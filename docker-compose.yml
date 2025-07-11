@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  # The Convex backend service
+  convex:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    command: npx convex dev
+    ports:
+      # Expose the Convex backend port to other services
+      - "3210:3210" 
+      # Expose the Convex dashboard port to your host machine
+      - "6790:6790" 
+    volumes:
+      # Sync your local files into the container for live updates
+      - ./convex:/app/convex
+      # Use a bind mount to sync the host's .convex directory into the container.
+      - ./.convex:/app/.convex
+    # This is needed for the local dev server to work correctly
+    environment:
+      - CONVEX_DEPLOYMENT=anonymous:anonymous-trading
+
+  # The Vite frontend service
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    command: npm run dev -- --host
+    ports:
+      # Expose the Vite dev server port to your host machine
+      - "5173:5173"
+    volumes:
+      # Sync your local files into the container for live updates
+      - ./src:/app/src
+      - ./public:/app/public
+      - ./index.html:/app/index.html
+      - ./vite.config.ts:/app/vite.config.ts
+    environment:
+      # IMPORTANT: Tell Vite to connect to the 'convex' service, not localhost
+      - VITE_CONVEX_URL=http://convex:3210
+    depends_on:
+      - convex
+
+  # The Python data ingestor service
+  ingestor:
+    build:
+      context: .
+      dockerfile: Dockerfile.ingestor
+    # Load your Breeze API keys from the .env file
+    env_file:
+      - .env
+    # IMPORTANT: Tell the script to connect to the 'convex' service
+    environment:
+      - CONVEX_URL=http://convex:3210
+    volumes:
+      # Sync the ingestor script for live updates
+      - ./breeze_ingestor.py:/app/breeze_ingestor.py
+      # Use a named volume for the cache to avoid host permission issues
+      - ingestor_cache:/app/cache
+    depends_on:
+      - convex
+
+# Define named volumes to persist data and avoid host permission issues
+volumes:
+  ingestor_cache:
+    driver: local

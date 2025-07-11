@@ -1,0 +1,26 @@
+# Use an official Python runtime as a parent image
+FROM python:3.11-slim
+
+# Set the working directory in the container
+WORKDIR /app
+
+# Create a non-root user and group for security
+RUN addgroup --system --gid 1001 appgroup && \
+    adduser --system --uid 1001 --gid 1001 appuser
+
+# Copy the requirements file and install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Create and set permissions for directories the appuser needs to write to
+RUN mkdir /app/cache /app/logs && \
+    chown appuser:appgroup /app/cache /app/logs
+
+# Copy the ingestor script as the new user
+COPY --chown=appuser:appgroup breeze_ingestor.py .
+
+# Switch to the non-root user
+USER appuser
+
+# The command to run when the container starts
+CMD ["python3", "breeze_ingestor.py"]

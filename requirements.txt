@@ -1,0 +1,5 @@
+breeze-connect
+requests
+pandas
+python-dotenv
+pytz
