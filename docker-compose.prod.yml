@@ -1,19 +1,17 @@
 version: '3.8'
-
 services:
-  # In production, the frontend is a self-contained Nginx server.
   frontend:
     build:
       context: .
-      dockerfile: Dockerfile # This now builds the final nginx image
+      dockerfile: Dockerfile
+      args:
+        - VITE_CONVEX_URL=${VITE_CONVEX_URL_PROD}
     image: indianrobinhood-frontend
     container_name: indianrobinhood-frontend
     restart: unless-stopped
     ports:
-      # Expose the container's port 80 on the host's port 8002 to avoid conflicts
-      - "8002:80"
-
-  # The Python data ingestor service for production.
+      - "8002:8080"
+      
   ingestor:
     build:
       context: .
@@ -21,17 +19,12 @@ services:
     image: indianrobinhood-ingestor
     container_name: indianrobinhood-ingestor
     restart: unless-stopped
+    # This env_file directive is now the ONLY source for environment variables
     env_file:
       - .env
     volumes:
-      # Mount a named volume to persist the securities master cache
       - ingestor_cache:/app/cache
-    # IMPORTANT: In production, this must point to your deployed Convex URL.
-    # You should add VITE_CONVEX_URL_PROD to your .env file after deploying.
-    environment:
-      - CONVEX_URL=${VITE_CONVEX_URL_PROD}
 
-# Define the named volume for persistent cache storage
 volumes:
   ingestor_cache:
     driver: local

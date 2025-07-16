@@ -6,19 +6,23 @@ import { usePrevious, useDebounce } from "../hooks";
 import { StockTable } from "./StockTable";
 
 export function StockTickerTable() {
-  // This `useQuery` hook subscribes to your `get` query in `convex/ohlcv.ts`
-  // and automatically updates the component whenever the data changes.
+  // Hook 1: useQuery
   const ohlcvBars = useQuery(api.ohlcv.get);
+  // Hook 2: usePrevious
   const prevOhlcvBars = usePrevious(ohlcvBars);
+  // Hook 3: useState
   const [searchTerm, setSearchTerm] = useState("");
+  // Hook 4: useDebounce
   const debouncedSearchTerm = useDebounce(searchTerm, 300); // Debounce input by 300ms
+  // Hook 5: useState
   const [updatedRows, setUpdatedRows] = useState<Record<string, "up" | "down" | undefined>>({});
+  // Hook 6: useState
   const [sortConfig, setSortConfig] = useState<{
     key: keyof Doc<"ohlcv">;
     direction: "ascending" | "descending";
   } | null>({ key: "stock_code", direction: "ascending" });
 
-
+  // Hook 7: useEffect
   useEffect(() => {
     if (!prevOhlcvBars || !ohlcvBars) return;
 
@@ -31,33 +35,20 @@ export function StockTickerTable() {
         newUpdates[newBar._id] = newBar.close > prevBar.close ? "up" : "down";
       }
     }
-
-    // Only update state if there are actual changes to avoid unnecessary re-renders
-    // and merge with previous state to prevent animations from being cut short.
+    
     if (Object.keys(newUpdates).length > 0) {
       setUpdatedRows((prev) => ({ ...prev, ...newUpdates }));
     }
-  }, [ohlcvBars]);
+  }, [ohlcvBars, prevOhlcvBars]);
 
-  // Handle loading and empty states for better UX
-  if (ohlcvBars === undefined) {
-    return <div>Loading real-time data...</div>;
-  }
-
-  if (ohlcvBars.length === 0) {
-    return (
-      <div>
-        <h2>Waiting for data...</h2>
-        <p>The data ingestor might be waiting for the market to open.</p>
-      </div>
-    );
-  }
-
+  // Hook 8: useMemo - MOVED TO THE TOP LEVEL
   const processedBars = useMemo(() => {
     if (!ohlcvBars) return [];
+
     let items = ohlcvBars.filter((bar) =>
       bar.stock_code.toLowerCase().includes(debouncedSearchTerm.toLowerCase())
     );
+
     if (sortConfig !== null) {
       items.sort((a, b) => {
         if (a[sortConfig.key] < b[sortConfig.key]) {
@@ -71,6 +62,20 @@ export function StockTickerTable() {
     }
     return items;
   }, [ohlcvBars, sortConfig, debouncedSearchTerm]);
+
+  // Conditional returns are now safe because all hooks have been called
+  if (ohlcvBars === undefined) {
+    return <div>Loading real-time data...</div>;
+  }
+
+  if (ohlcvBars.length === 0) {
+    return (
+      <div>
+        <h2>Waiting for data...</h2>
+        <p>The data ingestor might be waiting for the market to open.</p>
+      </div>
+    );
+  }
 
   const requestSort = (key: keyof Doc<"ohlcv">) => {
     let direction: "ascending" | "descending" = "ascending";

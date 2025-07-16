@@ -35,7 +35,7 @@ const headers: { key: keyof Doc<"ohlcv">; label: string }[] = [
   { key: "low", label: "Low" },
   { key: "close", label: "Close" },
   { key: "volume", label: "Volume" },
-  { key: "timestamp", label: "Timestamp" },
+  { key: "timestamp", label: "Last Update" },
 ];
 
 export function StockTable({ bars, updatedRows, requestSort, sortConfig, onAnimationEnd }: StockTableProps) {

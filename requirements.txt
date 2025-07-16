@@ -3,3 +3,4 @@ requests
 pandas
 python-dotenv
 pytz
+python-socketio
