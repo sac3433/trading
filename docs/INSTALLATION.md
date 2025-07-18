@@ -69,7 +69,7 @@ This guide provides step-by-step instructions for setting up the platform in bot
 
 ```bash
 # Clone the repository
-git clone https://github.com/IndianRobinHood/trading-platform.git
+git clone https://github.com/indianrobinhood/trading.git
 cd trading
 
 # Verify files
@@ -268,7 +268,7 @@ newgrp docker
 sudo apt install docker-compose-plugin
 
 # Clone and configure
-git clone https://github.com/IndianRobinHood/trading-platform.git
+git clone https://github.com/indianrobinhood/trading.git
 cd trading
 cp .env.example .env
 nano .env  # Configure with production values

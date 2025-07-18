@@ -9,7 +9,7 @@
   "author": "Indianrobinhood",
   "repository": {
     "type": "git",
-    "url": "https://github.com/IndianRobinHood/trading-platform.git"
+    "url": "https://github.com/indianrobinhood/trading.git"
   },
   "scripts": {
     "dev": "vite",

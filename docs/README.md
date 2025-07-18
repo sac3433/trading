@@ -34,7 +34,7 @@ A comprehensive opensource real-time stocks data platform designed specifically 
 
 ### 1. Clone Repository
 ```bash
-git clone https://github.com/IndianRobinHood/trading-platform.git
+git clone https://github.com/indianrobinhood/trading.git
 cd trading
 ```
 
