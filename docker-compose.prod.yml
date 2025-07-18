@@ -11,6 +11,8 @@ services:
     restart: unless-stopped
     ports:
       - "8002:8080"
+    volumes:
+      - token_config:/app/config
       
   ingestor:
     build:
@@ -19,12 +21,14 @@ services:
     image: indianrobinhood-ingestor
     container_name: indianrobinhood-ingestor
     restart: unless-stopped
-    # This env_file directive is now the ONLY source for environment variables
     env_file:
       - .env
     volumes:
       - ingestor_cache:/app/cache
+      - token_config:/app/config
 
 volumes:
   ingestor_cache:
+    driver: local
+  token_config:
     driver: local

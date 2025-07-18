@@ -4,7 +4,7 @@ import os
 import time
 import zipfile
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 import requests
 import requests.adapters
@@ -32,8 +32,35 @@ logging.basicConfig(
 # Load credentials and the Convex URL from environment variables
 API_KEY = os.getenv("BREEZE_API_KEY")
 SECRET_KEY = os.getenv("BREEZE_SECRET_KEY")
-SESSION_TOKEN = os.getenv("BREEZE_SESSION_TOKEN")  # Back to original
 CONVEX_URL = os.getenv("CONVEX_URL")
+
+# Token file path (shared volume)
+TOKEN_FILE_PATH = "/app/config/session_token.txt"
+
+def get_session_token():
+    """
+    Get session token from file first, fallback to environment variable.
+    """
+    try:
+        if os.path.exists(TOKEN_FILE_PATH):
+            with open(TOKEN_FILE_PATH, 'r') as f:
+                token = f.read().strip()
+                if token:
+                    logging.info("Using session token from config file.")
+                    return token
+    except Exception as e:
+        logging.warning(f"Could not read token from file: {e}")
+    
+    # Fallback to environment variable
+    env_token = os.getenv("BREEZE_SESSION_TOKEN")
+    if env_token:
+        logging.info("Using session token from environment variable.")
+        return env_token
+    
+    return None
+
+# Get session token
+SESSION_TOKEN = get_session_token()
 
 # Check for missing environment variables and exit if they aren't set
 if not all([API_KEY, SECRET_KEY, SESSION_TOKEN, CONVEX_URL]):
@@ -131,10 +158,37 @@ def get_nse_cash_stock_tokens():
             os.remove(CACHE_FILE_PATH)
         return []
 
+def is_market_session_time():
+    """
+    Checks if it's time to start the trading session (connect and subscribe).
+    Starts 15 minutes before market open for preparation.
+    """
+    try:
+        tz = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(tz)
+
+        # Check if it's a holiday
+        if now.strftime('%Y-%m-%d') in HOLIDAYS:
+            return False
+
+        # Check if it's a weekday (Monday=0, Sunday=6)
+        if now.weekday() > 4:
+            return False
+
+        # Start session at 9:00 AM (15 minutes before market open for subscriptions)
+        session_start = now.replace(hour=9, minute=0, second=0, microsecond=0)
+        # End session at 3:40 PM (10 minutes after market close to capture final bars)
+        session_end = now.replace(hour=15, minute=40, second=0, microsecond=0)
+
+        return session_start <= now <= session_end
+    except Exception as e:
+        logging.warning(f"Could not determine session status due to an error: {e}. Assuming session is closed.")
+        return False
+
 def is_market_open():
     """
-    Checks if the Indian stock market is open.
-    (Monday-Friday, 9:15 AM to 3:30 PM IST, excluding holidays)
+    Checks if the market is actually open for trading (9:15 AM to 3:30 PM IST).
+    Used to control when tick processing starts.
     """
     try:
         tz = pytz.timezone('Asia/Kolkata')
@@ -156,10 +210,48 @@ def is_market_open():
         logging.warning(f"Could not determine market status due to an error: {e}. Assuming market is closed.")
         return False
 
+def get_next_market_opening():
+    """
+    Calculate the next market opening time (9:15 AM IST on the next trading day).
+    Accounts for weekends and holidays.
+    """
+    try:
+        tz = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(tz)
+        
+        # First check if today still has a session ahead
+        if now.weekday() <= 4:  # Monday to Friday
+            if now.strftime('%Y-%m-%d') not in HOLIDAYS:
+                # Check if today's session hasn't started yet (before 9:00 AM)
+                today_session_start = now.replace(hour=9, minute=0, second=0, microsecond=0)
+                if now < today_session_start:
+                    # Market opens later today
+                    return now.replace(hour=9, minute=15, second=0, microsecond=0)
+        
+        # If today's session is over or it's weekend/holiday, check from tomorrow
+        next_day = now + timedelta(days=1)
+        
+        while True:
+            # Check if it's a weekday (Monday=0, Sunday=6)
+            if next_day.weekday() <= 4:  # Monday to Friday
+                # Check if it's not a holiday
+                if next_day.strftime('%Y-%m-%d') not in HOLIDAYS:
+                    # This is a valid trading day
+                    market_open_time = next_day.replace(hour=9, minute=15, second=0, microsecond=0)
+                    return market_open_time
+            
+            # Move to next day if weekend or holiday
+            next_day += timedelta(days=1)
+            
+    except Exception as e:
+        logging.warning(f"Could not calculate next market opening: {e}. Defaulting to 5-minute check.")
+        return None
+
 class Ingestor:
     def __init__(self):
         self.breeze = BreezeConnect(api_key=API_KEY)
         self.last_seen_timestamps = {}  # Track last seen timestamp per stock
+        self.subscriptions_complete = False  # Flag to control tick processing
 
     def on_ticks(self, ticks):
         """
@@ -167,6 +259,15 @@ class Ingestor:
         received from the Breeze WebSocket. It handles both single tick (dict)
         and multiple ticks (list of dicts).
         """
+        # Don't process ticks until all subscriptions are complete AND market is actually open
+        if not self.subscriptions_complete:
+            logging.debug("Subscriptions still in progress, holding back tick processing...")
+            return
+            
+        if not is_market_open():
+            logging.debug("Market not yet open, holding back tick processing...")
+            return
+            
         if not ticks:
             return
             
@@ -237,16 +338,26 @@ class Ingestor:
 
     def run(self):
         while True:
-            if is_market_open():
-                logging.info("Market is open. Starting ingestor process...")
+            if is_market_session_time():
+                logging.info("Trading session time. Starting ingestor process...")
                 try:
+                    # Re-read token at start of each session (in case it was updated)
+                    current_token = get_session_token()
+                    if not current_token:
+                        logging.error("No session token available. Retrying in 60 seconds.")
+                        time.sleep(60)
+                        continue
+                    
                     # The logical order: Generate session first, then connect to WebSocket
-                    self.breeze.generate_session(api_secret=SECRET_KEY, session_token=SESSION_TOKEN)
+                    self.breeze.generate_session(api_secret=SECRET_KEY, session_token=current_token)
                     logging.info("Successfully generated Breeze API session.")
 
                     self.breeze.ws_connect()
                     logging.info("WebSocket connected successfully.")
                     self.breeze.on_ticks = self.on_ticks
+                    
+                    # Reset the flag at the start of each session
+                    self.subscriptions_complete = False
                     
                     all_tokens = get_nse_cash_stock_tokens()
                     if not all_tokens:
@@ -254,19 +365,26 @@ class Ingestor:
                         time.sleep(60)
                         continue
 
-                    subscription_interval = os.getenv("BREEZE_INTERVAL", "1minute")  # Changed default to 1minute
+                    subscription_interval = os.getenv("BREEZE_INTERVAL", "1minute")
                     subscription_template = "4.1!"
                     
                     # Subscribe in batches to avoid overwhelming the API
                     batch_size = int(os.getenv("BATCH_SIZE", "25"))
                     subscription_delay = float(os.getenv("SUBSCRIPTION_DELAY", "0.1"))
                     
+                    if not is_market_open():
+                        logging.info("🌅 PRE-MARKET: Starting subscriptions before market opens at 9:15 AM...")
+                    
                     logging.info(f"Subscribing to {len(all_tokens)} stocks in batches of {batch_size}...")
+                    logging.info("📵 Tick processing is PAUSED until subscriptions complete AND market opens...")
+                    
+                    successful_subscriptions = 0
                     
                     for i, token in enumerate(all_tokens):
                         try:
                             stock_token = f"{subscription_template}{token}"
                             self.breeze.subscribe_feeds(stock_token=stock_token, interval=subscription_interval)
+                            successful_subscriptions += 1
                             logging.info(f"({i+1}/{len(all_tokens)}) ✓ Subscribed to {stock_token} for {subscription_interval} OHLCV.")
                         except Exception as e:
                             logging.error(f"✗ Failed to subscribe to {subscription_template}{token}: {e}")
@@ -279,19 +397,54 @@ class Ingestor:
                             logging.info(f"Completed batch {(i + 1) // batch_size}. Pausing briefly...")
                             time.sleep(2)  # Brief pause between batches
 
-                    logging.info("All subscriptions complete. Running until market close...")
-                    while is_market_open():
+                    # All subscriptions complete
+                    self.subscriptions_complete = True
+                    logging.info(f"🎯 All subscriptions complete! Successfully subscribed to {successful_subscriptions}/{len(all_tokens)} stocks.")
+                    
+                    # Wait for market to actually open if we're early
+                    while is_market_session_time() and not is_market_open():
+                        tz = pytz.timezone('Asia/Kolkata')
+                        now = datetime.now(tz)
+                        market_open_time = now.replace(hour=9, minute=15, second=0, microsecond=0)
+                        wait_seconds = (market_open_time - now).total_seconds()
+                        if wait_seconds > 0:
+                            logging.info(f"⏰ Subscriptions ready! Waiting {wait_seconds:.0f} seconds for market to open at 9:15 AM...")
+                            time.sleep(min(60, wait_seconds))  # Check every minute or until market opens
+                        else:
+                            break
+                    
+                    if is_market_open():
+                        logging.info("📡 Market is OPEN! Tick processing is now ENABLED - data will be ingested and stored.")
+
+                    logging.info("Running until session ends...")
+                    while is_market_session_time():
                         time.sleep(60) # Keep the script alive, checking every minute.
 
-                    logging.info("Market has closed. Disconnecting WebSocket.")
+                    logging.info("Trading session ended. Disconnecting WebSocket.")
                     self.breeze.ws_disconnect()
                 except Exception as e:
-                    logging.error(f"A critical error occurred during market hours: {e}. Retrying in 30s.")
+                    logging.error(f"A critical error occurred during session: {e}. Retrying in 30s.")
                     traceback.print_exc()
                     time.sleep(30)
             else:
-                logging.info("Market is closed. Checking again in 5 minutes.")
-                time.sleep(300)
+                # Calculate when next session starts (9:00 AM next trading day)
+                next_opening = get_next_market_opening()
+                if next_opening:
+                    # Adjust to start session 15 minutes earlier
+                    next_session_start = next_opening.replace(hour=9, minute=0)
+                    tz = pytz.timezone('Asia/Kolkata')
+                    now = datetime.now(tz)
+                    sleep_seconds = (next_session_start - now).total_seconds()
+                    
+                    if sleep_seconds > 0:
+                        logging.info(f"Trading session closed. Next session starts: {next_session_start.strftime('%Y-%m-%d %H:%M:%S IST')}")
+                        logging.info(f"Sleeping for {sleep_seconds/3600:.1f} hours until next session...")
+                        time.sleep(sleep_seconds)
+                    else:
+                        time.sleep(60)
+                else:
+                    logging.info("Trading session closed. Checking again in 5 minutes.")
+                    time.sleep(300)
 
 # --- Main Execution Block ---
 if __name__ == "__main__":

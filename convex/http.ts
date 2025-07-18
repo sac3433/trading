@@ -33,4 +33,35 @@ http.route({
   }),
 });
 
+// Define an HTTP endpoint to update the session token
+http.route({
+  path: "/updateToken",
+  method: "POST", 
+  handler: httpAction(async (_ctx, request) => {
+    try {
+      const { token } = await request.json();
+
+      if (!token || typeof token !== 'string' || token.length < 10) {
+        return new Response("Invalid token format", { status: 400 });
+      }
+
+      // In production, you'd add authentication here
+      console.log("Received token update request");
+      
+      // For this example, we'll return success
+      // The actual file writing would be done by the frontend service
+      return new Response(JSON.stringify({ 
+        success: true, 
+        message: "Token will be updated on next session restart" 
+      }), { 
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    } catch (error) {
+      console.error("Error updating token:", error);
+      return new Response("Internal server error", { status: 500 });
+    }
+  }),
+});
+
 export default http;

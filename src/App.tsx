@@ -1,14 +1,15 @@
 import './App.css'
 import { StockTickerTable } from './components/StockTickerTable'
+import { TokenManager } from "./components/TokenManager";
 
 function App() {
   return (
     <main>
-      <h1>IndianRobinhood - Live Ticker</h1>
-      <p>Displaying the latest 100 ticks from the ICICI Breeze API in real-time.</p>
+      <h1>Indianrobinhood - Real-time NSE Stock Data</h1>
+      <TokenManager />
       <StockTickerTable />
     </main>
-  )
+  );
 }
 
 export default App
